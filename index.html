@@ -190,6 +190,14 @@ body{background:#000;overflow:hidden;touch-action:none;font-family:'Courier New'
   </div>
 </div>
 
+<!-- HANDOVER SCREEN -->
+<div class="screen hide" id="s-handover" style="background:rgba(0,0,0,.92)">
+  <div id="ho-title" style="font-size:clamp(28px,5vw,64px);font-weight:900;letter-spacing:6px;color:#4488ff;text-shadow:0 0 30px #4488ff;margin-bottom:16px">P2 READY?</div>
+  <div id="ho-result" style="font-size:clamp(12px,2vw,18px);letter-spacing:3px;color:rgba(255,255,255,.5);margin-bottom:8px"></div>
+  <div style="font-size:clamp(11px,1.8vw,16px);letter-spacing:4px;color:rgba(255,220,0,.55);margin-top:28px">PLAYER 2 — 操作して走行開始</div>
+  <div style="font-size:clamp(9px,1.4vw,12px);letter-spacing:3px;color:rgba(255,255,255,.25);margin-top:10px">↑ W アクセル　SPACE ブースト　タッチでも可</div>
+</div>
+
 <!-- TOUCH -->
 <div id="touch">
   <div id="joy"><div id="joy-base"></div><div id="joy-dot"></div></div>
@@ -679,6 +687,23 @@ function notify(msg,col){
   const el=document.getElementById('ntf');el.textContent=msg;el.style.color=col||'#ffdd00';el.style.opacity='1';
   clearTimeout(ntfT);ntfT=setTimeout(()=>el.style.opacity='0',2600);
 }
+function showReady(player,col,msg){
+  // Show a big "GO!" overlay - hide after first input in animate loop
+  document.getElementById('ntf').textContent=msg||'操作して走行開始！';
+  document.getElementById('ntf').style.color=col||'#ffdd00';
+  document.getElementById('ntf').style.opacity='1';
+}
+
+function showHandover(p1Best){
+  // Full-screen between P1 and P2 in VS mode
+  document.getElementById('ho-title').textContent='P2 READY?';
+  document.getElementById('ho-title').style.color='#4488ff';
+  document.getElementById('ho-title').style.textShadow='0 0 30px #4488ff';
+  document.getElementById('ho-result').textContent=
+    'P1 ベストラップ: '+fmt(p1Best);
+  document.getElementById('s-handover').classList.remove('hide');
+}
+
 function lapFlash(){const el=document.getElementById('lap-flash');el.style.display='block';setTimeout(()=>el.style.display='none',450);}
 
 // Camera state
@@ -755,6 +780,27 @@ function animate(){
   const a1=accel,b1=brake,l1=left,r1=right, boost1=boostK&&car1.boost>0;
   const a2=accel,b2=brake,l2=left,r2=right, boost2=boostK&&car2.boost>0;
 
+  // Waiting for first move to start timer
+  if(gs.waiting){
+    const anyInput=accel||brake||left||right||boostK;
+    if(anyInput){
+      gs.waiting=false;
+      document.getElementById('ntf').style.opacity='0';
+      document.getElementById('s-handover').classList.add('hide');
+    } else {
+      // Still render + update camera but freeze lapTime
+      if(driveCar1){
+        const sinA=Math.sin(car1.angle),cosA=Math.cos(car1.angle);
+        const tCX=car1.x-sinA*11,tCY=car1.y+4.8,tCZ=car1.z-cosA*11;
+        const tLX=car1.x+sinA*4,tLY=car1.y+1.2,tLZ=car1.z+cosA*4;
+        camX+=(tCX-camX)*.2;camY+=(tCY-camY)*.2;camZ+=(tCZ-camZ)*.2;
+        camLX+=(tLX-camLX)*.2;camLY+=(tLY-camLY)*.2;camLZ+=(tLZ-camLZ)*.2;
+        camera.position.set(camX,camY,camZ);camera.lookAt(camLX,camLY,camLZ);
+      }
+      drawMM();renderer.render(scene,camera);return;
+    }
+  }
+
   if(K['KeyR']){resetCar(gs.vsMode&&gs.vsP2Turn?car2:car1);}
 
   if(driveCar1&&!car1.finished){
@@ -798,12 +844,14 @@ function animate(){
       gs._p1FinishFired=true;
       if(!gs.vsMode){setTimeout(showResult,800);}
       else if(!gs.vsP2Turn){
+        // Show handover screen — P2 starts when they move
+        showHandover(car1.bestLap);
         gs.vsP2Turn=true;
+        gs.waiting=true;
         resetCar(car2);initCam(car2);
         k2.G.visible=true;
         document.getElementById('p2-hud').style.display='block';
         document.getElementById('spd').style.display='none';
-        notify('✅ P1 DONE!  NOW P2 GO!','#4488ff');
         document.getElementById('cur-player').textContent='P2';
         document.getElementById('cur-player').style.color='#4488ff';
       }
@@ -853,7 +901,8 @@ function animate(){
 // ============================================================
 function startPractice(){
   car1=makeCar(-2);car2=makeCar(2);
-  gs.vsMode=false;gs.vsP2Turn=false;gs.started=true;
+  gs.vsMode=false;gs.vsP2Turn=false;
+  gs.started=true;gs.waiting=true;  // waiting for first input
   gs._p1FinishFired=false;gs._p2FinishFired=false;
   k2.G.visible=false;
   document.getElementById('p2-hud').style.display='none';
@@ -862,11 +911,14 @@ function startPractice(){
   document.getElementById('s-title').classList.add('hide');
   document.getElementById('s-result').classList.add('hide');
   document.getElementById('s-p2wait').classList.add('hide');
+  document.getElementById('s-handover').classList.add('hide');
+  showReady('P1','#ffdd00','操作して走行開始！');
   initCam(car1);
 }
 function startVS(){
   car1=makeCar(-2);car2=makeCar(2);
-  gs.vsMode=true;gs.vsP2Turn=false;gs.started=true;
+  gs.vsMode=true;gs.vsP2Turn=false;
+  gs.started=true;gs.waiting=true;
   gs._p1FinishFired=false;gs._p2FinishFired=false;
   k2.G.visible=false;
   document.getElementById('p2-hud').style.display='none';
@@ -875,10 +927,11 @@ function startVS(){
   document.getElementById('s-title').classList.add('hide');
   document.getElementById('s-result').classList.add('hide');
   document.getElementById('s-p2wait').classList.add('hide');
+  document.getElementById('s-handover').classList.add('hide');
   document.getElementById('cur-player').textContent='P1';
   document.getElementById('cur-player').style.color='#ffdd00';
+  showReady('P1','#ffdd00','操作して走行開始！');
   initCam(car1);
-  notify('P1 GO! 3 LAPS','#ffdd00');
 }
 
 document.getElementById('btn-practice').onclick=startPractice;
