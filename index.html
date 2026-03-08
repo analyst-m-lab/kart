@@ -622,27 +622,21 @@ function updateClosest(car){
   for(let s=-25;s<=25;s++){const idx=(car.closestSP+s+SN)%SN;const dx=SP[idx][0]-car.x,dz=SP[idx][1]-car.z,d=dx*dx+dz*dz;if(d<minD){minD=d;cl=idx;}}
   const diff=((cl-car.closestSP)+SN)%SN;
   car.wrongWay=diff>SN*.5&&diff<SN*.95;
-  // ラップカウント: 正走方向でSN末尾→先頭を通過した場合のみ
-  // 逆走でスタートラインを踏んだらペナルティフラグを立て、
-  // フラグが立っている間はゴール通過を無効にする
-  if(car.wrongWay){
-    car._wrongWayHit=true;  // 逆走でSL付近に来たことを記憶
-  }
-  // 正走でSN末尾→先頭ジャンプ かつ 逆走ペナルティなし
+
+  // ラップ進捗を追跡: 正走なら増加、逆走なら減少
+  // cl が前回より前に進んだ(正走方向)量を累積
+  const fwdDiff = diff<=SN*.5 ? diff : diff-SN;  // -SN/2..+SN/2、負=逆走
+  if(fwdDiff>0) car._lapProg=Math.min(1, (car._lapProg||0) + fwdDiff/SN);
+  else          car._lapProg=Math.max(0, (car._lapProg||0) + fwdDiff/SN);
+
+  // ゴール判定: SN末尾→先頭ジャンプ かつ 今周で最低85%走った場合のみ
   if(car.closestSP>SN-30&&cl<30&&car.lapTime>5){
-    if(!car._wrongWayHit){
+    if((car._lapProg||0)>=0.85){
       car.lapTimes.push(car.lapTime);
       if(car.lapTime<car.bestLap)car.bestLap=car.lapTime;
       car.lapTime=0;car.lap++;
-    } else {
-      // ペナルティ解除: 正走でSLを通過したのでリセット
-      car._wrongWayHit=false;
     }
-  }
-  // 正走でコースの中間地点（SN/2付近）を通過したら逆走フラグをリセット
-  // → 1周の半分以上ちゃんと走ればペナルティ消える
-  if(!car.wrongWay&&cl>SN*.4&&cl<SN*.6){
-    car._wrongWayHit=false;
+    car._lapProg=0;  // ラインを踏んだらリセット（正逆どちらでも）
   }
   car.closestSP=cl;
 }
@@ -795,6 +789,7 @@ function animate(){
 
   // Waiting for first move to start timer
   if(gs.waiting){
+    if(gs._waitFrames>0){gs._waitFrames--;drawMM();renderer.render(scene,camera);return;}
     const anyInput=accel||brake||left||right||boostK;
     if(anyInput){
       gs.waiting=false;
@@ -918,6 +913,7 @@ function startPractice(){
   document.getElementById('s-result').classList.add('hide');
   document.getElementById('s-p2wait').classList.add('hide');
   document.getElementById('s-handover').classList.add('hide');
+  gs._waitFrames=8;
   showReady('P1','#ffdd00','操作して走行開始！');
   initCam(car1);
 }
@@ -936,16 +932,21 @@ function startVS(){
   document.getElementById('s-handover').classList.add('hide');
   document.getElementById('cur-player').textContent='P1';
   document.getElementById('cur-player').style.color='#ffdd00';
+  gs._waitFrames=8;
   showReady('P1','#ffdd00','操作して走行開始！');
   initCam(car1);
 }
 
 document.getElementById('btn-p2go').onclick=()=>{
+  // Clear all input state so residual keys don't instantly start P2
+  Object.keys(K).forEach(k=>K[k]=false);
+  T.accel=T.brake=T.left=T.right=T.boost=false;
   document.getElementById('s-handover').classList.add('hide');
   gs.vsP2Turn=true;
   gs.waiting=true;
+  gs._waitFrames=8;  // ignore input for 8 frames after button press
   gs.started=true;
-  gs._p1FinishFired=true;  // already fired
+  gs._p1FinishFired=true;
   resetCar(car2);initCam(car2);
   k1.G.visible=false;
   k2.G.visible=true;
