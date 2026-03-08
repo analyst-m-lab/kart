@@ -617,26 +617,28 @@ function stepCar(car,accel,brake,left,right,boost,dt,sparksObj,now){
   return{vs,sparking};
 }
 
+// Track forward direction at start/finish (idx 0→1), precomputed
+const _SF_FX=SP[1][0]-SP[0][0], _SF_FZ=SP[1][1]-SP[0][1];
+const _SF_L=Math.sqrt(_SF_FX*_SF_FX+_SF_FZ*_SF_FZ);
+const SF_FWD_X=_SF_FX/_SF_L, SF_FWD_Z=_SF_FZ/_SF_L;  // track forward unit vector at S/F
+
 function updateClosest(car){
   let minD=Infinity,cl=car.closestSP;
   for(let s=-25;s<=25;s++){const idx=(car.closestSP+s+SN)%SN;const dx=SP[idx][0]-car.x,dz=SP[idx][1]-car.z,d=dx*dx+dz*dz;if(d<minD){minD=d;cl=idx;}}
   const diff=((cl-car.closestSP)+SN)%SN;
   car.wrongWay=diff>SN*.5&&diff<SN*.95;
 
-  // ラップ進捗を追跡: 正走なら増加、逆走なら減少
-  // cl が前回より前に進んだ(正走方向)量を累積
-  const fwdDiff = diff<=SN*.5 ? diff : diff-SN;  // -SN/2..+SN/2、負=逆走
-  if(fwdDiff>0) car._lapProg=Math.min(1, (car._lapProg||0) + fwdDiff/SN);
-  else          car._lapProg=Math.max(0, (car._lapProg||0) + fwdDiff/SN);
-
-  // ゴール判定: SN末尾→先頭ジャンプ かつ 今周で最低85%走った場合のみ
+  // ゴール判定: SN末尾→先頭ジャンプ かつ 車の向きがコース正走方向と一致
   if(car.closestSP>SN-30&&cl<30&&car.lapTime>5){
-    if((car._lapProg||0)>=0.85){
+    // 車の進行方向ベクトルとトラック正走方向の内積
+    const carDX=Math.sin(car.angle), carDZ=Math.cos(car.angle);
+    const dot=carDX*SF_FWD_X + carDZ*SF_FWD_Z;
+    if(dot>0){  // 正走方向で通過
       car.lapTimes.push(car.lapTime);
       if(car.lapTime<car.bestLap)car.bestLap=car.lapTime;
       car.lapTime=0;car.lap++;
     }
-    car._lapProg=0;  // ラインを踏んだらリセット（正逆どちらでも）
+    // dot<=0 なら逆走通過 → カウントしない
   }
   car.closestSP=cl;
 }
@@ -903,8 +905,10 @@ function animate(){
 function startPractice(){
   car1=makeCar(-2);car2=makeCar(2);
   gs.vsMode=false;gs.vsP2Turn=false;
-  gs.started=true;gs.waiting=true;  // waiting for first input
+  gs.started=true;gs.waiting=true;
   gs._p1FinishFired=false;gs._p2FinishFired=false;
+  k1.G.visible=true;
+  k1.G.position.set(car1.x,car1.y,car1.z);k1.G.rotation.y=car1.angle;
   k2.G.visible=false;
   document.getElementById('p2-hud').style.display='none';
   document.getElementById('spd').style.display='block';
@@ -922,6 +926,8 @@ function startVS(){
   gs.vsMode=true;gs.vsP2Turn=false;
   gs.started=true;gs.waiting=true;
   gs._p1FinishFired=false;gs._p2FinishFired=false;
+  k1.G.visible=true;
+  k1.G.position.set(car1.x,car1.y,car1.z);k1.G.rotation.y=car1.angle;
   k2.G.visible=false;
   document.getElementById('p2-hud').style.display='none';
   document.getElementById('spd').style.display='block';
@@ -950,6 +956,7 @@ document.getElementById('btn-p2go').onclick=()=>{
   resetCar(car2);initCam(car2);
   k1.G.visible=false;
   k2.G.visible=true;
+  k2.G.position.set(car2.x,car2.y,car2.z);k2.G.rotation.y=car2.angle;
   document.getElementById('p2-hud').style.display='block';
   document.getElementById('spd').style.display='block';
   document.getElementById('cur-player').textContent='P2';
