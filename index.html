@@ -481,10 +481,158 @@ function updateParticles(on){
 }
 
 // ============================================================
+// WALL COLLISION DATA  スプライン各点の壁境界を事前計算
+// ============================================================
+const wallData = [];  // {cx,cz,lx,lz}  中心と左法線
+for(let i=0;i<SN;i++){
+  const [lx,lz]=splineNorm(i);
+  wallData.push({cx:SP[i][0], cz:SP[i][1], lx, lz});
+}
+
+// カートに最も近いスプライン点を返す（全探索版、起動時のみ使用）
+function findClosestFull(x,z){
+  let minD=1e9,idx=0;
+  for(let i=0;i<SN;i++){
+    const dx=SP[i][0]-x,dz=SP[i][1]-z,d=dx*dx+dz*dz;
+    if(d<minD){minD=d;idx=i;}
+  }
+  return idx;
+}
+
+// 壁衝突判定 ── カートをコース内に押し戻し、衝突状態を返す
+// 戻り値: {hit:bool, glancing:bool, crash:bool, wallNx:n, wallNz:n}
+function resolveWall(){
+  // 最寄りスプライン点
+  let minD=1e9, ci=gs.closestSP;
+  for(let s=-6;s<=6;s++){
+    const idx=(gs.closestSP+s+SN)%SN;
+    const dx=SP[idx][0]-car.x, dz=SP[idx][1]-car.z;
+    const d=dx*dx+dz*dz;
+    if(d<minD){minD=d;ci=idx;}
+  }
+
+  const {cx,cz,lx,lz}=wallData[ci];
+  // カートの横方向オフセット（左が正）
+  const offX=car.x-cx, offZ=car.z-cz;
+  const lateral = offX*lx + offZ*lz;   // 左方向への距離
+
+  const WALL = TW - 1.2;  // 壁内側境界
+
+  if(Math.abs(lateral) < WALL) return {hit:false};
+
+  // 壁の法線（押し返す方向）
+  const side  = lateral > 0 ? 1 : -1;  // 1=左壁, -1=右壁
+  const wallNx= lx * side;
+  const wallNz= lz * side;
+
+  // はみ出し量を補正（押し戻す）
+  const over = Math.abs(lateral) - WALL;
+  car.x -= wallNx * over;
+  car.z -= wallNz * over;
+
+  // カートの進行方向ベクトル
+  const movX=Math.sin(car.angle), movZ=Math.cos(car.angle);
+  // 壁法線とのdot（-1=正面衝突, 0=平行, 1=離れる方向）
+  const dot = movX*wallNx + movZ*wallNz;
+
+  if(dot >= 0) return {hit:false}; // 壁から離れる方向なら無視
+
+  // 衝突角度 (0°=平行, 90°=正面)
+  const impactAngleDeg = Math.acos(Math.max(-1,Math.min(1,-dot)))*180/Math.PI;
+
+  const glancing = impactAngleDeg < 45;                    // 擦り傷
+  const crash    = impactAngleDeg>=45 && impactAngleDeg<=135; // 激突
+
+  return {hit:true, glancing, crash, wallNx, wallNz, dot, impactAngleDeg};
+}
+
+// ============================================================
+// SPARK PARTICLES  火花
+// ============================================================
+const SPARK_N = 60;
+const sparkAttr = new THREE.BufferAttribute(new Float32Array(SPARK_N*3),3);
+const sparkGeo  = new THREE.BufferGeometry();
+sparkGeo.setAttribute('position',sparkAttr);
+const sparkMesh = new THREE.Points(sparkGeo,
+  new THREE.PointsMaterial({color:0xffcc00,size:.25,transparent:true,opacity:.95,sizeAttenuation:true}));
+scene.add(sparkMesh);
+const sparkDat = Array.from({length:SPARK_N},()=>({life:0,x:0,y:-999,z:0,vx:0,vy:0,vz:0}));
+
+function emitSparks(x,y,z,wallNx,wallNz,count){
+  let spawned=0;
+  for(let i=0;i<SPARK_N&&spawned<count;i++){
+    if(sparkDat[i].life<=0){
+      sparkDat[i].life=.15+Math.random()*.25;
+      sparkDat[i].x=x+(Math.random()-.5)*.3;
+      sparkDat[i].y=y+.3*Math.random();
+      sparkDat[i].z=z+(Math.random()-.5)*.3;
+      // 壁から弾かれる方向にランダム散乱
+      const spd=4+Math.random()*8;
+      const ang=Math.atan2(wallNx,wallNz)+(Math.random()-.5)*1.6;
+      sparkDat[i].vx=Math.sin(ang)*spd;
+      sparkDat[i].vy=1+Math.random()*4;
+      sparkDat[i].vz=Math.cos(ang)*spd;
+      spawned++;
+    }
+  }
+}
+
+function updateSparks(dt){
+  sparkDat.forEach((p,i)=>{
+    if(p.life>0){
+      p.life-=dt;
+      p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt;
+      p.vy-=12*dt; // 重力
+      if(p.life<=0) p.y=-999;
+    }
+    sparkAttr.setXYZ(i,p.x,p.y,p.z);
+  });
+  sparkAttr.needsUpdate=true;
+  // 火花があるときだけ明るい色
+  const anyAlive=sparkDat.some(p=>p.life>0);
+  sparkMesh.material.opacity=anyAlive?.95:0;
+}
+
+// ============================================================
+// OBSTACLES  コース外の障害物（全位置スプラインからdist>=18確認済み）
+// ============================================================
+(function buildObstacles(){
+  const c1=new THREE.MeshStandardMaterial({color:0xaa2200,roughness:.7,metalness:.1});
+  const c2=new THREE.MeshStandardMaterial({color:0x334466,roughness:.5,metalness:.4});
+  const c3=new THREE.MeshStandardMaterial({color:0x553311,roughness:.8});
+  const trunkM=new THREE.MeshStandardMaterial({color:0x4a2e0a,roughness:.9});
+  const leafM =new THREE.MeshStandardMaterial({color:0x1a3a0a,roughness:.8});
+
+  // [x, z, w, h, d, matIdx]  — 全点コース外確認済み
+  const obDefs=[
+    [ -79, -59, 6,5,5, 0], [ -79, -35, 5,7,4, 1], [ -63,  -3, 4,5,6, 2],
+    [ -47, -99, 7,4,5, 0], [ -31, -27, 5,6,4, 1], [ -31,  13, 4,4,5, 2],
+    [ -23, -67, 6,5,4, 0], [  -7, -19, 5,5,6, 1], [   9,  21, 4,6,4, 2],
+    [  25,-107, 6,5,5, 0], [  41, -51, 5,4,5, 1], [  49, -99, 7,5,4, 2],
+    [  65,  13, 4,5,5, 0], [  73, -75, 6,4,5, 1], [  81, -43, 5,6,4, 2],
+  ];
+  const mats=[c1,c2,c3];
+  obDefs.forEach(([x,z,w,h,d,mi])=>{
+    const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mats[mi]);
+    m.position.set(x,h/2,z); m.castShadow=true; m.receiveShadow=true; scene.add(m);
+    // 上に小さい目印ライト
+    const pl=new THREE.PointLight(0xff3300,.4,10);
+    pl.position.set(x,h+1,z); scene.add(pl);
+  });
+
+  // 木（コース外）
+  [[-88,-50],[-88,-26],[-76,-98],[-52,-110],[52,-110],[76,-86],[76,-26],[-40,20],[-64,18]].forEach(([x,z])=>{
+    const h=4+Math.random()*3;
+    const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.3,.45,h,7),trunkM);
+    trunk.position.set(x,h/2,z); scene.add(trunk);
+    const leaf=new THREE.Mesh(new THREE.SphereGeometry(2.2+Math.random()*.8,7,6),leafM);
+    leaf.position.set(x,h+1.2,z); scene.add(leaf);
+  });
+})()
+// ============================================================
 // MAIN LOOP
 // ============================================================
 let prevT=performance.now();
-// カメラ位置（スムージング用）
 let camX=0,camY=5,camZ=-12,camLX=0,camLY=1,camLZ=0;
 resetCar();
 
@@ -498,7 +646,7 @@ function animate(){
 
   gs.lapTime+=dt;
 
-  // ── 入力 ──
+  // INPUT
   const accel   = K['ArrowUp']   ||K['KeyW']||T.accel;
   const brake   = K['ArrowDown'] ||K['KeyS']||T.brake;
   const left    = K['ArrowLeft'] ||K['KeyA']||T.left;
@@ -506,85 +654,114 @@ function animate(){
   const boosting= (K['Space']||T.boost) && car.boost>0;
   if(K['KeyR'])resetCar();
 
-  // ── ブースト ──
+  // BOOST
   if(boosting) car.boost=Math.max(0,car.boost-35*dt);
   else         car.boost=Math.min(100,car.boost+20*dt);
 
-  // ── 速度 ──
-  const MAX = boosting?95:68;
-  const ACC = boosting?55:38;
-  const BRK = 60;
-  if(accel)           car.speed=Math.min(car.speed+ACC*dt, MAX);
+  // SPEED
+  const MAX=boosting?95:68;
+  const ACC=boosting?55:38;
+  const BRK=60;
+  if(accel)           car.speed=Math.min(car.speed+ACC*dt,MAX);
   if(brake){
     if(car.speed>0.2) car.speed=Math.max(0,car.speed-BRK*dt);
     else              car.speed=Math.max(-8,car.speed-18*dt);
   }
-  if(!accel&&!brake)  car.speed*=.97;
+  if(!accel&&!brake)  car.speed*=0.97;
 
-  // ── ステアリング (即時) ──
+  // STEERING — 速度によらず十分な旋回力。高速でも MIN_STEER rad/s を保証
   const sd=(left?1:0)-(right?1:0);
-  if(sd!==0 && Math.abs(car.speed)>0.3){
-    // 速度が高いほどステアを絞る
-    const sf=Math.max(.22, 1.0-Math.abs(car.speed)/MAX*.72);
-    car.angle+=sd*1.55*sf*dt;
+  const spd=Math.abs(car.speed);
+  if(sd!==0 && spd>0.2){
+    const MIN_STEER=1.8, MAX_STEER=3.8;
+    const t=Math.min(spd/MAX,1.0);
+    const steerRate=MIN_STEER+(MAX_STEER-MIN_STEER)*(1.0-t);
+    car.angle+=sd*steerRate*dt;
     gs.visualSteer=sd;
   } else {
     gs.visualSteer=0;
   }
 
-  // ── 位置更新 ──
+  // POSITION UPDATE
   car.x+=Math.sin(car.angle)*car.speed*dt;
   car.z+=Math.cos(car.angle)*car.speed*dt;
 
-  // ── カートメッシュ ──
+  // WALL COLLISION
+  const col=resolveWall();
+  let sparking=false;
+  if(col.hit){
+    const movX=Math.sin(car.angle), movZ=Math.cos(car.angle);
+    // 壁接線方向 (法線の垂直)
+    const tanX=-col.wallNz, tanZ=col.wallNx;
+    const tanDot=movX*tanX+movZ*tanZ;
+    if(col.crash){
+      // 45°〜135°の正面衝突: 完全停止 + 大量火花
+      car.speed=0;
+      emitSparks(car.x,car.y,car.z,col.wallNx,col.wallNz,30);
+      sparking=true;
+    } else {
+      // 45°未満の擦り: 接線方向に速度を逃がして減速 + 火花
+      car.speed=car.speed*Math.abs(tanDot)*0.82;
+      if(Math.abs(tanDot)>0.05){
+        const targetAngle=Math.atan2(tanX*Math.sign(tanDot),tanZ*Math.sign(tanDot));
+        let da=targetAngle-car.angle;
+        while(da> Math.PI)da-=Math.PI*2;
+        while(da<-Math.PI)da+=Math.PI*2;
+        car.angle+=da*0.35;
+      }
+      emitSparks(car.x,car.y,car.z,col.wallNx,col.wallNz,8);
+      sparking=true;
+    }
+  }
+
+  // KART MESH
   KG.position.set(car.x,car.y,car.z);
   KG.rotation.y=car.angle;
-  KG.rotation.z=-gs.visualSteer*.06*Math.min(1,Math.abs(car.speed)/30);
+  KG.rotation.z=-gs.visualSteer*0.07*Math.min(1,spd/30);
 
   // タイヤ
-  const spin=car.speed*.28*dt;
+  const spin=car.speed*0.28*dt;
   wMeshes.forEach(({g,front})=>{
     g.children.forEach(c=>c.rotation.x+=spin);
-    if(front) g.rotation.y=gs.visualSteer*.45;
+    if(front) g.rotation.y=gs.visualSteer*0.45;
   });
   ugM.emissiveIntensity=boosting?1.8+Math.sin(now*.04)*.6:.4+Math.sin(now*.002)*.1;
 
-  // ── カメラ追従 ──
-  // ターゲット: カートの真後ろ少し上
+  // CAMERA — カートの真後ろ上方を追う
   const sinA=Math.sin(car.angle), cosA=Math.cos(car.angle);
   const tCX=car.x-sinA*11, tCY=car.y+4.8, tCZ=car.z-cosA*11;
   const tLX=car.x+sinA*4,  tLY=car.y+1.2, tLZ=car.z+cosA*4;
-  const cs=.12;  // カメラスムージング
+  const cs=0.12;
   camX+=(tCX-camX)*cs; camY+=(tCY-camY)*cs; camZ+=(tCZ-camZ)*cs;
   camLX+=(tLX-camLX)*cs; camLY+=(tLY-camLY)*cs; camLZ+=(tLZ-camLZ)*cs;
   camera.position.set(camX,camY,camZ);
   camera.lookAt(camLX,camLY,camLZ);
 
-  // ── ウェイポイント & ラップ ──
+  // WAYPOINT & LAP
   let minD=Infinity,cl=gs.closestSP;
   for(let s=-15;s<=15;s++){
     const idx=(gs.closestSP+s+SN)%SN;
-    const dx=SP[idx][0]-car.x,dz=SP[idx][1]-car.z;
-    const d=dx*dx+dz*dz;
+    const dx=SP[idx][0]-car.x,dz=SP[idx][1]-car.z,d=dx*dx+dz*dz;
     if(d<minD){minD=d;cl=idx;}
   }
   const diff=((cl-gs.closestSP)+SN)%SN;
-  gs.wrongWay=diff>SN*.5&&diff<SN*.95;
+  gs.wrongWay=diff>SN*0.5&&diff<SN*0.95;
   document.getElementById('ww').style.display=gs.wrongWay?'block':'none';
   if(gs.closestSP>SN-30&&cl<30&&gs.lapTime>5){
-    if(gs.lapTime<gs.bestLap){gs.bestLap=gs.lapTime;document.getElementById('e-best').textContent=fmt(gs.bestLap);notify(`🏆 ベストラップ！ ${fmt(gs.bestLap)}`);}
-    else notify(`ラップ ${gs.lap} 完了！ ${fmt(gs.lapTime)}`);
+    if(gs.lapTime<gs.bestLap){gs.bestLap=gs.lapTime;document.getElementById('e-best').textContent=fmt(gs.bestLap);notify('\u{1F3C6} ベストラップ！ '+fmt(gs.bestLap));}
+    else notify('ラップ '+gs.lap+' 完了！ '+fmt(gs.lapTime));
     gs.lap++;gs.lapTime=0;document.getElementById('e-lap').textContent=gs.lap;
   }
   gs.closestSP=cl;
 
   updateParticles(accel||boosting);
+  updateSparks(dt);
 
-  // ── HUD ──
+  // HUD
   const kmh=Math.round(Math.abs(car.speed)*3.6);
   const sn=document.getElementById('spd-n');
   sn.textContent=kmh;
-  sn.style.textShadow=boosting?'0 0 24px #ff6600':'0 0 20px #ffdd00';
+  sn.style.textShadow=boosting?'0 0 24px #ff6600':sparking?'0 0 24px #ffaa00':'0 0 20px #ffdd00';
   const bf=document.getElementById('boost-fill');
   bf.style.width=car.boost+'%';
   bf.style.background=car.boost<20?'linear-gradient(90deg,#ff3300,#ff1100)':
