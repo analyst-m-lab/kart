@@ -191,11 +191,12 @@ body{background:#000;overflow:hidden;touch-action:none;font-family:'Courier New'
 </div>
 
 <!-- HANDOVER SCREEN -->
-<div class="screen hide" id="s-handover" style="background:rgba(0,0,0,.92)">
-  <div id="ho-title" style="font-size:clamp(28px,5vw,64px);font-weight:900;letter-spacing:6px;color:#4488ff;text-shadow:0 0 30px #4488ff;margin-bottom:16px">P2 READY?</div>
-  <div id="ho-result" style="font-size:clamp(12px,2vw,18px);letter-spacing:3px;color:rgba(255,255,255,.5);margin-bottom:8px"></div>
-  <div style="font-size:clamp(11px,1.8vw,16px);letter-spacing:4px;color:rgba(255,220,0,.55);margin-top:28px">PLAYER 2 — 操作して走行開始</div>
-  <div style="font-size:clamp(9px,1.4vw,12px);letter-spacing:3px;color:rgba(255,255,255,.25);margin-top:10px">↑ W アクセル　SPACE ブースト　タッチでも可</div>
+<div class="screen hide" id="s-handover" style="background:rgba(0,0,0,.95)">
+  <div style="font-size:clamp(14px,2vw,20px);letter-spacing:6px;color:rgba(255,220,0,.5);margin-bottom:20px">PLAYER 1 FINISHED</div>
+  <div id="ho-result" style="font-size:clamp(20px,3.5vw,42px);font-weight:900;letter-spacing:4px;color:#ffdd00;text-shadow:0 0 20px #ffdd00;margin-bottom:36px"></div>
+  <div style="font-size:clamp(11px,1.8vw,15px);letter-spacing:5px;color:rgba(255,255,255,.35);margin-bottom:32px">プレイヤーを交代してください</div>
+  <div id="ho-title" style="font-size:clamp(32px,6vw,72px);font-weight:900;letter-spacing:8px;color:#4488ff;text-shadow:0 0 30px #4488ff;margin-bottom:40px">PLAYER 2</div>
+  <button class="mbtn mbtn-r" id="btn-p2go" style="font-size:16px;padding:20px 52px;letter-spacing:6px">P2 スタート ▶</button>
 </div>
 
 <!-- TOUCH -->
@@ -621,10 +622,27 @@ function updateClosest(car){
   for(let s=-25;s<=25;s++){const idx=(car.closestSP+s+SN)%SN;const dx=SP[idx][0]-car.x,dz=SP[idx][1]-car.z,d=dx*dx+dz*dz;if(d<minD){minD=d;cl=idx;}}
   const diff=((cl-car.closestSP)+SN)%SN;
   car.wrongWay=diff>SN*.5&&diff<SN*.95;
+  // ラップカウント: 正走方向でSN末尾→先頭を通過した場合のみ
+  // 逆走でスタートラインを踏んだらペナルティフラグを立て、
+  // フラグが立っている間はゴール通過を無効にする
+  if(car.wrongWay){
+    car._wrongWayHit=true;  // 逆走でSL付近に来たことを記憶
+  }
+  // 正走でSN末尾→先頭ジャンプ かつ 逆走ペナルティなし
   if(car.closestSP>SN-30&&cl<30&&car.lapTime>5){
-    car.lapTimes.push(car.lapTime);
-    if(car.lapTime<car.bestLap)car.bestLap=car.lapTime;
-    car.lapTime=0;car.lap++;
+    if(!car._wrongWayHit){
+      car.lapTimes.push(car.lapTime);
+      if(car.lapTime<car.bestLap)car.bestLap=car.lapTime;
+      car.lapTime=0;car.lap++;
+    } else {
+      // ペナルティ解除: 正走でSLを通過したのでリセット
+      car._wrongWayHit=false;
+    }
+  }
+  // 正走でコースの中間地点（SN/2付近）を通過したら逆走フラグをリセット
+  // → 1周の半分以上ちゃんと走ればペナルティ消える
+  if(!car.wrongWay&&cl>SN*.4&&cl<SN*.6){
+    car._wrongWayHit=false;
   }
   car.closestSP=cl;
 }
@@ -695,12 +713,7 @@ function showReady(player,col,msg){
 }
 
 function showHandover(p1Best){
-  // Full-screen between P1 and P2 in VS mode
-  document.getElementById('ho-title').textContent='P2 READY?';
-  document.getElementById('ho-title').style.color='#4488ff';
-  document.getElementById('ho-title').style.textShadow='0 0 30px #4488ff';
-  document.getElementById('ho-result').textContent=
-    'P1 ベストラップ: '+fmt(p1Best);
+  document.getElementById('ho-result').textContent='P1 ベストラップ: '+fmt(p1Best);
   document.getElementById('s-handover').classList.remove('hide');
 }
 
@@ -789,10 +802,11 @@ function animate(){
       document.getElementById('s-handover').classList.add('hide');
     } else {
       // Still render + update camera but freeze lapTime
-      if(driveCar1){
-        const sinA=Math.sin(car1.angle),cosA=Math.cos(car1.angle);
-        const tCX=car1.x-sinA*11,tCY=car1.y+4.8,tCZ=car1.z-cosA*11;
-        const tLX=car1.x+sinA*4,tLY=car1.y+1.2,tLZ=car1.z+cosA*4;
+      const waitCar=driveCar2?car2:car1;
+      {
+        const sinA=Math.sin(waitCar.angle),cosA=Math.cos(waitCar.angle);
+        const tCX=waitCar.x-sinA*11,tCY=waitCar.y+4.8,tCZ=waitCar.z-cosA*11;
+        const tLX=waitCar.x+sinA*4,tLY=waitCar.y+1.2,tLZ=waitCar.z+cosA*4;
         camX+=(tCX-camX)*.2;camY+=(tCY-camY)*.2;camZ+=(tCZ-camZ)*.2;
         camLX+=(tLX-camLX)*.2;camLY+=(tLY-camLY)*.2;camLZ+=(tLZ-camLZ)*.2;
         camera.position.set(camX,camY,camZ);camera.lookAt(camLX,camLY,camLZ);
@@ -844,16 +858,8 @@ function animate(){
       gs._p1FinishFired=true;
       if(!gs.vsMode){setTimeout(showResult,800);}
       else if(!gs.vsP2Turn){
-        // Show handover screen — P2 starts when they move
+        gs.started=false;  // pause game while handover screen shown
         showHandover(car1.bestLap);
-        gs.vsP2Turn=true;
-        gs.waiting=true;
-        resetCar(car2);initCam(car2);
-        k2.G.visible=true;
-        document.getElementById('p2-hud').style.display='block';
-        document.getElementById('spd').style.display='none';
-        document.getElementById('cur-player').textContent='P2';
-        document.getElementById('cur-player').style.color='#4488ff';
       }
     }
   }
@@ -933,6 +939,22 @@ function startVS(){
   showReady('P1','#ffdd00','操作して走行開始！');
   initCam(car1);
 }
+
+document.getElementById('btn-p2go').onclick=()=>{
+  document.getElementById('s-handover').classList.add('hide');
+  gs.vsP2Turn=true;
+  gs.waiting=true;
+  gs.started=true;
+  gs._p1FinishFired=true;  // already fired
+  resetCar(car2);initCam(car2);
+  k1.G.visible=false;
+  k2.G.visible=true;
+  document.getElementById('p2-hud').style.display='block';
+  document.getElementById('spd').style.display='block';
+  document.getElementById('cur-player').textContent='P2';
+  document.getElementById('cur-player').style.color='#4488ff';
+  showReady('P2','#4488ff','操作して走行開始！');
+};
 
 document.getElementById('btn-practice').onclick=startPractice;
 document.getElementById('btn-versus').onclick=()=>{
