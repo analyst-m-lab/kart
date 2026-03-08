@@ -266,12 +266,13 @@ function spFwd(i){const ni=(i+1)%SN;return[SP[ni][0]-SP[i][0],SP[ni][1]-SP[i][1]
 // RENDERER
 // ============================================================
 const canvas=document.getElementById('c');
-const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
-renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const isMobile=/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)||innerWidth<768;
+const renderer=new THREE.WebGLRenderer({canvas,antialias:!isMobile,powerPreference:'high-performance'});
+renderer.setPixelRatio(isMobile?1:Math.min(devicePixelRatio,1.5));
 renderer.setSize(innerWidth,innerHeight);
-renderer.shadowMap.enabled=true;
-renderer.shadowMap.type=THREE.PCFSoftShadowMap;
-renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.shadowMap.enabled=!isMobile;
+renderer.shadowMap.type=THREE.PCFShadowMap;
+renderer.toneMapping=isMobile?THREE.NoToneMapping:THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure=1.1;
 
 const scene=new THREE.Scene();
@@ -285,15 +286,15 @@ window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camer
 scene.add(new THREE.AmbientLight(0x334466,2.6));
 const sun=new THREE.DirectionalLight(0xfff6e0,2.8);
 sun.position.set(50,110,20);sun.castShadow=true;
-sun.shadow.mapSize.set(2048,2048);
+sun.shadow.mapSize.set(isMobile?512:1024,isMobile?512:1024);
 sun.shadow.camera.left=sun.shadow.camera.bottom=-200;
 sun.shadow.camera.right=sun.shadow.camera.top=200;
 sun.shadow.bias=-.001;scene.add(sun);
 {const fl=new THREE.DirectionalLight(0x1133aa,.6);fl.position.set(-40,25,-50);scene.add(fl);}
 
 // Stars
-{const sg=new THREE.BufferGeometry(),sp=new Float32Array(2400*3);
-for(let i=0;i<7200;i+=3){sp[i]=(Math.random()-.5)*700;sp[i+1]=Math.random()*160+30;sp[i+2]=(Math.random()-.5)*700;}
+{const _sc=isMobile?600:2400;const sg=new THREE.BufferGeometry(),sp=new Float32Array(_sc*3);
+for(let i=0;i<_sc*3;i+=3){sp[i]=(Math.random()-.5)*700;sp[i+1]=Math.random()*160+30;sp[i+2]=(Math.random()-.5)*700;}
 sg.setAttribute('position',new THREE.BufferAttribute(sp,3));
 scene.add(new THREE.Points(sg,new THREE.PointsMaterial({color:0x9aaabb,size:.32,sizeAttenuation:true})));}
 
@@ -301,13 +302,10 @@ scene.add(new THREE.Points(sg,new THREE.PointsMaterial({color:0x9aaabb,size:.32,
 // TRACK
 // ============================================================
 (function(){
-  {const gr=new THREE.Mesh(new THREE.PlaneGeometry(600,600),new THREE.MeshStandardMaterial({color:0x0a1a04,roughness:1}));gr.rotation.x=-Math.PI/2;gr.receiveShadow=true;scene.add(gr);}
+  {const gr=new THREE.Mesh(new THREE.PlaneGeometry(600,600),isMobile?new THREE.MeshLambertMaterial({color:0x0a1a04}):new THREE.MeshStandardMaterial({color:0x0a1a04,roughness:1}));gr.rotation.x=-Math.PI/2;gr.receiveShadow=true;scene.add(gr);}
 
-  const roadM=new THREE.MeshStandardMaterial({color:0x1c1c20,roughness:.9});
-  const wallM=new THREE.MeshStandardMaterial({color:0x20293a,roughness:.8});
-  const capM =new THREE.MeshStandardMaterial({color:0xddbb00,emissive:0xddbb00,emissiveIntensity:.15});
-  const kR=new THREE.MeshStandardMaterial({color:0xbb1818,roughness:.6});
-  const kW=new THREE.MeshStandardMaterial({color:0xdddddd,roughness:.6});
+  const _M=(c,e,ei)=>isMobile?new THREE.MeshLambertMaterial({color:c,emissive:e||0,emissiveIntensity:ei||0}):new THREE.MeshStandardMaterial({color:c,roughness:.8});
+  const roadM=_M(0x1c1c20);const wallM=_M(0x20293a);const capM=_M(0xddbb00,0xddbb00,.15);const kR=_M(0xbb1818);const kW=_M(0xdddddd);
 
   const rv=[],ri=[],wv=[],wi=[],cv=[],ci=[];
   for(let i=0;i<SN;i++){
@@ -344,11 +342,11 @@ scene.add(new THREE.Points(sg,new THREE.PointsMaterial({color:0x9aaabb,size:.32,
   // Start/finish line
   const sfFwd=spFwd(0),sfAng=Math.atan2(sfFwd[0],sfFwd[1]);
   const[sfLx,sfLz]=spNorm(0);
-  const sfLine=new THREE.Mesh(new THREE.PlaneGeometry(TW*2,.5),new THREE.MeshStandardMaterial({color:0xff0000,emissive:0xff2200,emissiveIntensity:2.5}));
+  const sfLine=new THREE.Mesh(new THREE.PlaneGeometry(TW*2,.5),new THREE.MeshLambertMaterial({color:0xff0000,emissive:0xff2200,emissiveIntensity:2.5}));
   sfLine.rotation.x=-Math.PI/2;sfLine.rotation.z=sfAng;sfLine.position.set(SP[0][0],.04,SP[0][1]);scene.add(sfLine);
   const tw=(TW*2)/8;
   for(let col=0;col<8;col++){
-    const cm=new THREE.MeshStandardMaterial({color:col%2===0?0xffffff:0x111111,emissive:col%2===0?0xffffff:0,emissiveIntensity:col%2===0?.25:0});
+    const cm=new THREE.MeshLambertMaterial({color:col%2===0?0xffffff:0x111111,emissive:col%2===0?0xffffff:0,emissiveIntensity:col%2===0?.25:0});
     const tile=new THREE.Mesh(new THREE.PlaneGeometry(tw,1.3),cm);
     tile.rotation.x=-Math.PI/2;tile.rotation.z=sfAng;
     tile.position.set(SP[0][0]+sfLx*(col-3.5)*tw,.05,SP[0][1]+sfLz*(col-3.5)*tw);scene.add(tile);
@@ -356,12 +354,12 @@ scene.add(new THREE.Points(sg,new THREE.PointsMaterial({color:0x9aaabb,size:.32,
 
   // Street lamps — offset TW+5.0 from local normal, skip if actual spline dist < TW+2
   // (sharp-curve inner side can fold back; verified TW+5 = zero road intrusions)
-  const poleM=new THREE.MeshStandardMaterial({color:0x555566,metalness:.8,roughness:.2});
-  const bulbM=new THREE.MeshStandardMaterial({color:0xffffc8,emissive:0xffffc8,emissiveIntensity:3.5});
+  const poleM=new THREE.MeshLambertMaterial({color:0x555566});
+  const bulbM=new THREE.MeshLambertMaterial({color:0xffffc8,emissive:0xffffc8,emissiveIntensity:3.5});
   // helper: min dist from (x,z) to any spline point (sampled every 3 for speed)
   function splineDist(x,z){let m=1e9;for(let k=0;k<SN;k+=3){const dx=SP[k][0]-x,dz=SP[k][1]-z,d=dx*dx+dz*dz;if(d<m)m=d;}return Math.sqrt(m);}
   const LAMP_OFF=TW+5.0;
-  for(let i=0;i<SN;i+=8){
+  for(let i=0;i<SN;i+=(isMobile?16:8)){
     const[lx,lz]=spNorm(i);
     [-1,1].forEach(s=>{
       const px=SP[i][0]+lx*LAMP_OFF*s, pz=SP[i][1]+lz*LAMP_OFF*s;
@@ -370,7 +368,7 @@ scene.add(new THREE.Points(sg,new THREE.PointsMaterial({color:0x9aaabb,size:.32,
       pole.position.set(px,2.1,pz);scene.add(pole);
       const bulb=new THREE.Mesh(new THREE.SphereGeometry(.13,6,6),bulbM);
       bulb.position.set(px,4.3,pz);scene.add(bulb);
-      const pl=new THREE.PointLight(0xffffc8,.5,14);pl.position.copy(bulb.position);scene.add(pl);
+      if(!isMobile){const pl=new THREE.PointLight(0xffffc8,.5,14);pl.position.copy(bulb.position);scene.add(pl);}
     });
   }
 
@@ -383,20 +381,20 @@ scene.add(new THREE.Points(sg,new THREE.PointsMaterial({color:0x9aaabb,size:.32,
     [ 30,-50,12,34,10],[ 30,-120,13,34,11],[ 72, 20,12,33,10],
     [ 72,-92,13,33,11],[ 86, -8,12,33,10],
   ];
-  const winM=new THREE.MeshStandardMaterial({color:0xffdd80,emissive:0xffcc44,emissiveIntensity:.5});
+  const winM=new THREE.MeshLambertMaterial({color:0xffdd80,emissive:0xffcc44,emissiveIntensity:.5});
   bldDefs.forEach(([x,z,w,h,d],bi)=>{
     const col=bldColours[bi%bldColours.length];
-    const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshStandardMaterial({color:col,roughness:.85}));
-    m.position.set(x,h/2,z);m.castShadow=true;scene.add(m);
+    const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),isMobile?new THREE.MeshLambertMaterial({color:col}):new THREE.MeshStandardMaterial({color:col,roughness:.85}));
+    m.position.set(x,h/2,z);if(!isMobile)m.castShadow=true;scene.add(m);
     // windows
-    for(let wy=2.5;wy<h-2;wy+=2.8) for(let wc=0;wc<Math.floor(w/2.4);wc++) if(Math.random()<.5){
+    if(!isMobile) for(let wy=2.5;wy<h-2;wy+=2.8) for(let wc=0;wc<Math.floor(w/2.4);wc++) if(Math.random()<.5){
       const ww=new THREE.Mesh(new THREE.BoxGeometry(.55,.75,.1),winM);
       ww.position.set(x-w/2+1.1+wc*2.4,wy,z+d/2+.06);scene.add(ww);
     }
   });
 
   // Grandstand (outside track)
-  const gsM=new THREE.Mesh(new THREE.BoxGeometry(22,5,6),new THREE.MeshStandardMaterial({color:0x130010,roughness:.8}));
+  const gsM=new THREE.Mesh(new THREE.BoxGeometry(22,5,6),isMobile?new THREE.MeshLambertMaterial({color:0x130010}):new THREE.MeshStandardMaterial({color:0x130010,roughness:.8}));
   gsM.position.set(-4,2.5,-16);gsM.castShadow=true;scene.add(gsM);
 
   // Obstacles — verified dist >= TW+9
@@ -405,7 +403,11 @@ scene.add(new THREE.Points(sg,new THREE.PointsMaterial({color:0x9aaabb,size:.32,
     [-10,-20,5,5],[  0, 20,4,4],[ 10,-20,5,4],[ 30,-20,4,5],
     [ 50,-100,5,4],[ 80,-50,4,5],[ 80,-30,5,4],[ 80,-70,4,4],
   ];
-  const obMats=[
+  const obMats=isMobile?[
+    new THREE.MeshLambertMaterial({color:0x993322}),
+    new THREE.MeshLambertMaterial({color:0x334466}),
+    new THREE.MeshLambertMaterial({color:0x554422}),
+  ]:[
     new THREE.MeshStandardMaterial({color:0x993322,roughness:.7}),
     new THREE.MeshStandardMaterial({color:0x334466,roughness:.5,metalness:.35}),
     new THREE.MeshStandardMaterial({color:0x554422,roughness:.8}),
@@ -413,12 +415,12 @@ scene.add(new THREE.Points(sg,new THREE.PointsMaterial({color:0x9aaabb,size:.32,
   obPositions.forEach(([x,z,w,h],oi)=>{
     const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,w),obMats[oi%3]);
     m.position.set(x,h/2,z);m.castShadow=true;m.receiveShadow=true;scene.add(m);
-    const pl=new THREE.PointLight(0xff4400,.3,8);pl.position.set(x,h+.5,z);scene.add(pl);
+    if(!isMobile){const pl=new THREE.PointLight(0xff4400,.3,8);pl.position.set(x,h+.5,z);scene.add(pl);}
   });
 
   // Trees — outside
-  const trkM=new THREE.MeshStandardMaterial({color:0x4a2e0a,roughness:.9});
-  const lfM =new THREE.MeshStandardMaterial({color:0x183a0a,roughness:.8});
+  const trkM=isMobile?new THREE.MeshLambertMaterial({color:0x4a2e0a}):new THREE.MeshStandardMaterial({color:0x4a2e0a,roughness:.9});
+  const lfM=isMobile?new THREE.MeshLambertMaterial({color:0x183a0a}):new THREE.MeshStandardMaterial({color:0x183a0a,roughness:.8});
   [[-88,-50],[-88,-26],[-76,-98],[-52,-110],[52,-110],[76,-86],[76,-26],[-40,20],[-64,18],[86,-60],[90,-22]].forEach(([tx,tz])=>{
     const h=4+Math.random()*3;
     const tr=new THREE.Mesh(new THREE.CylinderGeometry(.28,.42,h,7),trkM);tr.position.set(tx,h/2,tz);scene.add(tr);
@@ -431,7 +433,7 @@ scene.add(new THREE.Points(sg,new THREE.PointsMaterial({color:0x9aaabb,size:.32,
 // ============================================================
 function makeKart(color){
   const G=new THREE.Group();scene.add(G);
-  function mat(c,e,ei,me,ro){return new THREE.MeshStandardMaterial({color:c,emissive:e||0,emissiveIntensity:ei||0,metalness:me||0,roughness:ro!=null?ro:.5});}
+  function mat(c,e,ei){return isMobile?new THREE.MeshLambertMaterial({color:c,emissive:e||0,emissiveIntensity:ei||0}):new THREE.MeshStandardMaterial({color:c,emissive:e||0,emissiveIntensity:ei||0,metalness:.3,roughness:.5});}
   const bM=mat(color,0,0,.7,.15), bkM=mat(0x080808,0,0,0,.6), slM=mat(0xbbbbbb,0,0,.85,.15);
   const ugM=mat(color,color,.7);
   const add=(geo,m,pos)=>{const ms=new THREE.Mesh(geo,m);if(pos)ms.position.set(...pos);ms.castShadow=true;G.add(ms);return ms;};
@@ -464,7 +466,7 @@ k2.G.visible=false;
 // ============================================================
 // SPARKS
 // ============================================================
-const SPARK_N=80;
+const SPARK_N=isMobile?20:80;
 function makeSparks(col){
   const attr=new THREE.BufferAttribute(new Float32Array(SPARK_N*3),3);
   const geo=new THREE.BufferGeometry();geo.setAttribute('position',attr);
@@ -494,7 +496,7 @@ const sp1=makeSparks(0xffcc00), sp2=makeSparks(0x88ccff);
 // ============================================================
 // EXHAUST PARTICLES
 // ============================================================
-const EX_N=60;
+const EX_N=isMobile?20:60;
 function makeExhaust(){
   const attr=new THREE.BufferAttribute(new Float32Array(EX_N*3),3);
   const geo=new THREE.BufferGeometry();geo.setAttribute('position',attr);
@@ -567,7 +569,7 @@ function resetCar(car){
 }
 
 function stepCar(car,accel,brake,left,right,boost,dt,sparksObj,now){
-  const MAX=boost?92:65,ACC=boost?52:36,BRK=58;
+  const MAX=boost?110:68,ACC=boost?65:40,BRK=58;  // boost gives +62% speed
   if(accel)     car.speed=Math.min(car.speed+ACC*dt,MAX);
   if(brake){if(car.speed>0.2)car.speed=Math.max(0,car.speed-BRK*dt);else car.speed=Math.max(-7,car.speed-16*dt);}
   if(!accel&&!brake)car.speed*=.97;
@@ -734,7 +736,7 @@ let vs1={x:0}, vs2={x:0};
 function animate(){
   requestAnimationFrame(animate);
   const now=performance.now();
-  const dt=Math.min((now-prevT)/1000,.033);
+  const dt=Math.min((now-prevT)/1000,isMobile?.05:.033);
   prevT=now;
 
   if(!gs.started){renderer.render(scene,camera);return;}
